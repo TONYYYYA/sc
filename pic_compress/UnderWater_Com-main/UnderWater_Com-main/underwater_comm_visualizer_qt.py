@@ -18,6 +18,11 @@ import numpy as np
 from PIL import Image
 
 try:
+    import sounddevice as sd
+except Exception:
+    sd = None
+
+try:
     from PySide6.QtCore import QObject, Qt, QTimer, Signal
     from PySide6.QtGui import QColor, QFont, QImage, QPalette, QPixmap
     from PySide6.QtWidgets import (
@@ -432,6 +437,15 @@ if PYSIDE6_AVAILABLE:
             self.offline_loopback_checkbox.toggled.connect(self._on_center_frequency_changed)
             acoustic_layout.addWidget(self.offline_loopback_checkbox, 5, 0, 1, 4)
 
+            acoustic_layout.addWidget(QLabel("输入设备"), 6, 0)
+            self.input_device_combo = QComboBox()
+            self.input_device_combo.currentIndexChanged.connect(self._on_input_device_changed)
+            acoustic_layout.addWidget(self.input_device_combo, 6, 1, 1, 2)
+            self.refresh_input_devices_btn = QPushButton("刷新设备")
+            self.refresh_input_devices_btn.clicked.connect(lambda: self._refresh_input_device_combo(announce=True))
+            acoustic_layout.addWidget(self.refresh_input_devices_btn, 6, 3)
+            self._refresh_input_device_combo(announce=False)
+
             layout.addWidget(acoustic_box, 3, 0, 1, 4)
 
             btn_row = QHBoxLayout()
@@ -754,6 +768,50 @@ if PYSIDE6_AVAILABLE:
                 "max_decode_candidates": int(self.config_data.phy_max_decode_candidates),
             }
 
+        def _refresh_input_device_combo(self, announce=False):
+            if not hasattr(self, "input_device_combo"):
+                return
+            combo = self.input_device_combo
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("自动选择（推荐）", None)
+            if sd is None:
+                combo.addItem("sounddevice 不可用", None)
+                combo.setEnabled(False)
+            else:
+                combo.setEnabled(True)
+                try:
+                    devices = sd.query_devices()
+                except Exception as e:
+                    combo.addItem(f"设备查询失败: {e}", None)
+                    combo.setEnabled(False)
+                    devices = []
+                for idx, dev in enumerate(devices):
+                    in_ch = int(dev.get("max_input_channels", 0) or 0)
+                    if in_ch <= 0:
+                        continue
+                    name = str(dev.get("name", f"device-{idx}"))
+                    sr = int(float(dev.get("default_samplerate", 0) or 0))
+                    combo.addItem(f"[{idx}] {name} (in={in_ch}, fs={sr})", idx)
+
+            target = self.config_data.ams22_device_index
+            selected = 0
+            for i in range(combo.count()):
+                if combo.itemData(i) == target:
+                    selected = i
+                    break
+            combo.setCurrentIndex(selected)
+            combo.blockSignals(False)
+            self._on_input_device_changed()
+            if announce:
+                self._log(f"输入设备列表已刷新，可选输入设备数: {max(0, combo.count() - 1)}")
+
+        def _on_input_device_changed(self):
+            if not hasattr(self, "input_device_combo"):
+                return
+            data = self.input_device_combo.currentData()
+            self.config_data.ams22_device_index = None if data is None else int(data)
+
         def _sync_center_frequency_from_ui(self, announce=False):
             if not hasattr(self, "center_freq_entry"):
                 return True
@@ -806,6 +864,8 @@ if PYSIDE6_AVAILABLE:
             self.config_data.min_rx_rms_guard = float(rx_guard)
             if hasattr(self, "offline_loopback_checkbox"):
                 self.config_data.force_offline_loopback = bool(self.offline_loopback_checkbox.isChecked())
+            if hasattr(self, "input_device_combo"):
+                self._on_input_device_changed()
             self.min_rx_rms_guard = float(rx_guard)
 
             self.center_freq_entry.setText(f"{fc:.1f}")
@@ -829,7 +889,8 @@ if PYSIDE6_AVAILABLE:
                     f"pilot_amp={self.config_data.phy_pilot_amp:.2f}, sps={self.config_data.phy_sps}, "
                     f"phases={self.config_data.phy_max_decimation_phases}, cand_mul={self.config_data.phy_max_candidate_multiplier:.2f}, "
                     f"max_decode={self.config_data.phy_max_decode_candidates}, rx_guard={self.config_data.min_rx_rms_guard:.4f}, "
-                    f"offline_loopback={self.config_data.force_offline_loopback}"
+                    f"offline_loopback={self.config_data.force_offline_loopback}, "
+                    f"input_device_index={self.config_data.ams22_device_index}"
                 )
             self.canvas_plot.draw_idle()
             return True
