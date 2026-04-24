@@ -404,8 +404,19 @@ class UnderwaterCommVisualizer(tk.Tk):
             style="Muted.TLabel",
         ).grid(row=4, column=0, columnspan=4, sticky="w", pady=6)
 
+        ttk.Label(frame, text="输入设备索引", style="Panel.TLabel").grid(row=5, column=0, sticky="w", padx=(0, 8), pady=4)
+        self.input_device_index_entry = ttk.Entry(frame)
+        self.input_device_index_entry.grid(row=5, column=1, sticky="ew", pady=4)
+        if self.config_data.ams22_device_index is not None:
+            self.input_device_index_entry.insert(0, str(self.config_data.ams22_device_index))
+        ttk.Label(
+            frame,
+            text="留空=自动选择；填写 sounddevice 查询到的输入设备 index。",
+            style="Muted.TLabel",
+        ).grid(row=5, column=2, columnspan=2, sticky="w", pady=4)
+
         btns = ttk.Frame(frame, style="Card.TFrame")
-        btns.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        btns.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(10, 0))
         ttk.Button(btns, text="1. 发射端分析", command=self.run_tx_analysis).pack(side="left", padx=4)
         ttk.Button(btns, text="2. 发射与传输", command=self.run_full_tx, style="Secondary.TButton").pack(side="left", padx=4)
         ttk.Button(btns, text="3. 接收与重建", command=self.run_rx, style="Ghost.TButton").pack(side="left", padx=4)
@@ -748,6 +759,15 @@ class UnderwaterCommVisualizer(tk.Tk):
             raise FileNotFoundError("请先选择有效图像")
         self.config_data.img_path = img_path
         self.config_data.core_script_path = self.core_entry.get().strip() or DEFAULT_CORE_SCRIPT_PATH
+        if hasattr(self, "input_device_index_entry"):
+            text = self.input_device_index_entry.get().strip()
+            if not text:
+                self.config_data.ams22_device_index = None
+            else:
+                try:
+                    self.config_data.ams22_device_index = int(text)
+                except Exception as e:
+                    raise ValueError(f"输入设备索引无效: {text}") from e
 
     def _reset_run_state(self, reset_images=False):
         self.bitstream_cache = None
