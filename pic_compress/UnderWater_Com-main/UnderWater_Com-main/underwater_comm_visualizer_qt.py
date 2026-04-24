@@ -137,6 +137,46 @@ BUILTIN_METHODS = {
     "JSCC传输": str(ROOT_DIR / "JSCC_TxRx.py"),
 }
 
+
+class MinimalSTL10TestDataset:
+    """Lightweight STL10 test loader: only needs test_X.bin and test_y.bin."""
+
+    def __init__(self, root):
+        root = Path(root)
+        bin_dir = root / "stl10_binary"
+        x_path = bin_dir / "test_X.bin"
+        y_path = bin_dir / "test_y.bin"
+        if not x_path.is_file() or not y_path.is_file():
+            raise FileNotFoundError(
+                f"未找到精简 STL10 测试文件，期望: {x_path} 和 {y_path}"
+            )
+        self._x = np.memmap(str(x_path), dtype=np.uint8, mode="r")
+        self._y = np.memmap(str(y_path), dtype=np.uint8, mode="r")
+        if self._x.size % (3 * 96 * 96) != 0:
+            raise RuntimeError(f"test_X.bin 大小异常: {self._x.size} bytes")
+        n = self._x.size // (3 * 96 * 96)
+        if self._y.size < n:
+            raise RuntimeError(
+                f"test_y.bin 标签数量不足: labels={self._y.size}, images={n}"
+            )
+        self._n = int(n)
+        self._x = self._x.reshape(self._n, 3, 96, 96)
+
+    def __len__(self):
+        return self._n
+
+    def __getitem__(self, idx):
+        idx = int(idx)
+        if idx < 0 or idx >= self._n:
+            raise IndexError(idx)
+        chw = np.asarray(self._x[idx], dtype=np.uint8)
+        hwc = np.transpose(chw, (1, 2, 0))
+        img = Image.fromarray(hwc, mode="RGB")
+        label = int(self._y[idx]) - 1
+        if label < 0:
+            label = 0
+        return img, label
+
 PALETTE = {
     "bg": "#f3efe6",
     "panel": "#fbf8f2",
@@ -1039,17 +1079,29 @@ if PYSIDE6_AVAILABLE:
         def _get_stl10_test_dataset(self):
             if self._stl10_test_dataset is not None:
                 return self._stl10_test_dataset
+            data_root = str(PIC_COMPRESS_DIR / "data")
+            root_path = Path(data_root)
+            try:
+                self._stl10_test_dataset = MinimalSTL10TestDataset(root_path)
+                self._log(f"已加载精简 STL10 测试集（仅 test_X/test_y）: {root_path / 'stl10_binary'}")
+                return self._stl10_test_dataset
+            except Exception as minimal_e:
+                self._log(f"精简 STL10 加载失败，尝试 torchvision 标准加载: {minimal_e}")
             try:
                 from torchvision import datasets
             except Exception as e:
-                raise RuntimeError(f"无法导入 torchvision: {e}") from e
-            data_root = str(PIC_COMPRESS_DIR / "data")
+                raise RuntimeError(f"无法导入 torchvision，且精简加载失败: {e}") from e
             try:
                 self._stl10_test_dataset = datasets.STL10(root=data_root, split="test", download=False)
             except Exception as e:
-                raise RuntimeError(
-                    f"未找到 STL10 测试集，请先准备数据目录: {data_root}，错误: {e}"
-                ) from e
+                try:
+                    self._log(f"本地未找到 STL10 测试集，正在尝试自动下载到: {data_root}")
+                    self._stl10_test_dataset = datasets.STL10(root=data_root, split="test", download=True)
+                except Exception as download_e:
+                    raise RuntimeError(
+                        f"未找到 STL10 测试集，且自动下载失败。数据目录: {data_root}，"
+                        f"原始错误: {e}，下载错误: {download_e}"
+                    ) from download_e
             return self._stl10_test_dataset
 
         def choose_stl_test_image(self):
