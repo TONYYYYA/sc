@@ -276,6 +276,8 @@ def _quantize_to_bits(s):
     res_scale = float(2 ** int(base_bits))
 
     quantizer_base = MultiBitSTEQuantizer(bits=base_bits, clip_val=1.0, mode="tanh", compand_mu=6.0)
+    if hasattr(quantizer_base, "to"):
+        quantizer_base = quantizer_base.to(s.device)
     if hasattr(quantizer_base, "quantize_with_indices"):
         base_q, base_idx = quantizer_base.quantize_with_indices(s)
     elif hasattr(quantizer_base, "quantize"):
@@ -287,6 +289,8 @@ def _quantize_to_bits(s):
     if res_bits > 0:
         residual = torch.tanh(s) - base_q
         quantizer_res = MultiBitSTEQuantizer(bits=res_bits, clip_val=1.0, mode="tanh", compand_mu=6.0)
+        if hasattr(quantizer_res, "to"):
+            quantizer_res = quantizer_res.to(residual.device)
         if hasattr(quantizer_res, "quantize_with_indices"):
             _, res_idx = quantizer_res.quantize_with_indices(residual * res_scale)
         elif hasattr(quantizer_res, "quantize"):
