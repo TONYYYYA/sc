@@ -42,7 +42,8 @@ except Exception as exc:
 
 try:
     from pic_compress.test_real_channel import MultiBitSTEQuantizer, split_quant_bits  # noqa: E402
-except Exception:
+except BaseException as exc:
+    PIC_COMPRESS_IMPORT_ERRORS.append(f"pic_compress.test_real_channel: {exc}")
     try:
         from pic_compress.quantizers import MultiBitSTEQuantizer  # noqa: E402
 
@@ -275,13 +276,23 @@ def _quantize_to_bits(s):
     res_scale = float(2 ** int(base_bits))
 
     quantizer_base = MultiBitSTEQuantizer(bits=base_bits, clip_val=1.0, mode="tanh", compand_mu=6.0)
-    base_q, base_idx = quantizer_base.quantize_with_indices(s)
+    if hasattr(quantizer_base, "quantize_with_indices"):
+        base_q, base_idx = quantizer_base.quantize_with_indices(s)
+    elif hasattr(quantizer_base, "quantize"):
+        base_q, base_idx = quantizer_base.quantize(s)
+    else:
+        base_q, base_idx = quantizer_base(s)
     base_bits_np = _gray_encode_indices(base_idx.detach().cpu().numpy(), base_bits)
 
     if res_bits > 0:
         residual = torch.tanh(s) - base_q
         quantizer_res = MultiBitSTEQuantizer(bits=res_bits, clip_val=1.0, mode="tanh", compand_mu=6.0)
-        _, res_idx = quantizer_res.quantize_with_indices(residual * res_scale)
+        if hasattr(quantizer_res, "quantize_with_indices"):
+            _, res_idx = quantizer_res.quantize_with_indices(residual * res_scale)
+        elif hasattr(quantizer_res, "quantize"):
+            _, res_idx = quantizer_res.quantize(residual * res_scale)
+        else:
+            _, res_idx = quantizer_res(residual * res_scale)
         res_bits_np = _gray_encode_indices(res_idx.detach().cpu().numpy(), res_bits)
         bits_np = np.concatenate([base_bits_np, res_bits_np], axis=0)
     else:
