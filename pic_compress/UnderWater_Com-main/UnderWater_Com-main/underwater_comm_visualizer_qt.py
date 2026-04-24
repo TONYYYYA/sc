@@ -174,6 +174,7 @@ class RunConfig:
     rx_wav_path: str = str(ROOT_DIR / "savedata" / "rx.wav")
     tx_duration: int = 25
     ams22_device_index: int | None = None
+    tx_output_device_index: int | None = None
     rx_channels: int = 1
     rx_samplerate: int = 64000
     center_frequency_hz: float = 8000.0
@@ -441,10 +442,19 @@ if PYSIDE6_AVAILABLE:
             self.input_device_combo = QComboBox()
             self.input_device_combo.currentIndexChanged.connect(self._on_input_device_changed)
             acoustic_layout.addWidget(self.input_device_combo, 6, 1, 1, 2)
-            self.refresh_input_devices_btn = QPushButton("刷新设备")
+            self.refresh_input_devices_btn = QPushButton("刷新输入")
             self.refresh_input_devices_btn.clicked.connect(lambda: self._refresh_input_device_combo(announce=True))
             acoustic_layout.addWidget(self.refresh_input_devices_btn, 6, 3)
             self._refresh_input_device_combo(announce=False)
+
+            acoustic_layout.addWidget(QLabel("输出设备"), 7, 0)
+            self.output_device_combo = QComboBox()
+            self.output_device_combo.currentIndexChanged.connect(self._on_output_device_changed)
+            acoustic_layout.addWidget(self.output_device_combo, 7, 1, 1, 2)
+            self.refresh_output_devices_btn = QPushButton("刷新输出")
+            self.refresh_output_devices_btn.clicked.connect(lambda: self._refresh_output_device_combo(announce=True))
+            acoustic_layout.addWidget(self.refresh_output_devices_btn, 7, 3)
+            self._refresh_output_device_combo(announce=False)
 
             layout.addWidget(acoustic_box, 3, 0, 1, 4)
 
@@ -812,6 +822,50 @@ if PYSIDE6_AVAILABLE:
             data = self.input_device_combo.currentData()
             self.config_data.ams22_device_index = None if data is None else int(data)
 
+        def _refresh_output_device_combo(self, announce=False):
+            if not hasattr(self, "output_device_combo"):
+                return
+            combo = self.output_device_combo
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("自动选择（推荐）", None)
+            if sd is None:
+                combo.addItem("sounddevice 不可用", None)
+                combo.setEnabled(False)
+            else:
+                combo.setEnabled(True)
+                try:
+                    devices = sd.query_devices()
+                except Exception as e:
+                    combo.addItem(f"设备查询失败: {e}", None)
+                    combo.setEnabled(False)
+                    devices = []
+                for idx, dev in enumerate(devices):
+                    out_ch = int(dev.get("max_output_channels", 0) or 0)
+                    if out_ch <= 0:
+                        continue
+                    name = str(dev.get("name", f"device-{idx}"))
+                    sr = int(float(dev.get("default_samplerate", 0) or 0))
+                    combo.addItem(f"[{idx}] {name} (out={out_ch}, fs={sr})", idx)
+
+            target = self.config_data.tx_output_device_index
+            selected = 0
+            for i in range(combo.count()):
+                if combo.itemData(i) == target:
+                    selected = i
+                    break
+            combo.setCurrentIndex(selected)
+            combo.blockSignals(False)
+            self._on_output_device_changed()
+            if announce:
+                self._log(f"输出设备列表已刷新，可选输出设备数: {max(0, combo.count() - 1)}")
+
+        def _on_output_device_changed(self):
+            if not hasattr(self, "output_device_combo"):
+                return
+            data = self.output_device_combo.currentData()
+            self.config_data.tx_output_device_index = None if data is None else int(data)
+
         def _sync_center_frequency_from_ui(self, announce=False):
             if not hasattr(self, "center_freq_entry"):
                 return True
@@ -866,6 +920,8 @@ if PYSIDE6_AVAILABLE:
                 self.config_data.force_offline_loopback = bool(self.offline_loopback_checkbox.isChecked())
             if hasattr(self, "input_device_combo"):
                 self._on_input_device_changed()
+            if hasattr(self, "output_device_combo"):
+                self._on_output_device_changed()
             self.min_rx_rms_guard = float(rx_guard)
 
             self.center_freq_entry.setText(f"{fc:.1f}")
@@ -890,7 +946,8 @@ if PYSIDE6_AVAILABLE:
                     f"phases={self.config_data.phy_max_decimation_phases}, cand_mul={self.config_data.phy_max_candidate_multiplier:.2f}, "
                     f"max_decode={self.config_data.phy_max_decode_candidates}, rx_guard={self.config_data.min_rx_rms_guard:.4f}, "
                     f"offline_loopback={self.config_data.force_offline_loopback}, "
-                    f"input_device_index={self.config_data.ams22_device_index}"
+                    f"input_device_index={self.config_data.ams22_device_index}, "
+                    f"output_device_index={self.config_data.tx_output_device_index}"
                 )
             self.canvas_plot.draw_idle()
             return True
@@ -1481,6 +1538,8 @@ if PYSIDE6_AVAILABLE:
                     tx_accepts_varkw = any(
                         p.kind == inspect.Parameter.VAR_KEYWORD for p in tx_sig.parameters.values()
                     )
+                    if "tx_output_device_index" in tx_sig.parameters or tx_accepts_varkw:
+                        tx_kwargs["tx_output_device_index"] = self.config_data.tx_output_device_index
                     force_offline_loopback = bool(self.config_data.force_offline_loopback)
                     if "force_offline_loopback" in tx_sig.parameters or tx_accepts_varkw:
                         tx_kwargs["force_offline_loopback"] = force_offline_loopback

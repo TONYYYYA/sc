@@ -3,6 +3,7 @@ import math
 import os
 import shutil
 import sys
+import inspect
 from datetime import datetime
 from pathlib import Path
 
@@ -427,6 +428,7 @@ def Tx(
     img_path,
     rx_wav_path=str(DEFAULT_RX_WAV_PATH),
     ams22_device_index=6,
+    tx_output_device_index=None,
     rx_channels=1,
     rx_samplerate=64000,
     center_frequency_hz=8000.0,
@@ -457,7 +459,7 @@ def Tx(
     ENG.Copy_2_of_main_GenSignal(str(TX_BITSTREAM_PATH), str(TX_WAV_PATH), nargout=0)
     _log(log_callback, f"调制完成，发送波形已保存到: {TX_WAV_PATH}")
 
-    return run_audio_txrx_pipeline(
+    pipeline_kwargs = dict(
         method_name=METHOD_NAME,
         wav_path=str(TX_WAV_PATH),
         rx_wav_path=str(rx_wav_path),
@@ -471,6 +473,13 @@ def Tx(
         log_callback=log_callback,
         runtime_cfg=AUDIO_RUNTIME_CFG,
     )
+    try:
+        sig = inspect.signature(run_audio_txrx_pipeline)
+        if "tx_output_device_index" in sig.parameters:
+            pipeline_kwargs["tx_output_device_index"] = tx_output_device_index
+    except Exception:
+        pass
+    return run_audio_txrx_pipeline(**pipeline_kwargs)
 
 
 @torch.no_grad()
