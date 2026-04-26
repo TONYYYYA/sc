@@ -110,7 +110,8 @@ class MinimalSTL10TestDataset:
         if idx < 0 or idx >= self._n:
             raise IndexError(idx)
         chw = np.asarray(self._x[idx], dtype=np.uint8)
-        hwc = np.transpose(chw, (1, 2, 0))
+        # STL10 binary stores each channel in column-major order, so swap H/W.
+        hwc = np.transpose(chw, (2, 1, 0))
         img = Image.fromarray(hwc, mode="RGB")
         label = int(self._y[idx]) - 1
         if label < 0:
